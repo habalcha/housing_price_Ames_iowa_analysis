@@ -1,0 +1,278 @@
+---
+title: "Ames, Iowa Housing Analysis"
+author: "Hermi Balcha"
+output: html_document
+---
+
+
+## Part 1: EDA
+
+```{r setup, include=TRUE}
+
+#housing is our data set stored as a data frame
+
+housing <- read.csv("housing.txt", header = TRUE)
+library(ggplot2)
+#did we get strings we didn't want?
+
+# str(housing) #nope all looks good but I want to get rid of the Id column
+
+#ID <- housing$Id
+
+housing <- housing[, -1]#getting rid of the first column
+
+###Getting rid of missing data###
+
+# ?na.omit
+
+#strategy here is to first get rid of variables / columns with a lot of NAs
+
+#then remove observations with NAs
+
+#my choice - get rid of all variables with a majority of missing values
+
+#count how many NAs are in each column
+
+how.many.nas <- sapply(housing, function(x) sum(is.na(x)))
+
+#print how.many.nas and make sure they make sense to get rid of
+
+# how.many.nas
+
+#couple of notes - the "PoolQC", "Fence" and "MiscFeature" variables have 
+
+#a lot of NAs, but these may be meaningful! We should check with our manager 
+
+#to see if they are. For now, I'll remove them.
+
+#which ones are majorities?
+
+indx.remove <- which(how.many.nas > dim(housing)[1]/2)
+
+# names(housing)[indx.remove]
+
+#remove the columns with more than amajority missing
+
+housing.refined <- housing[, -indx.remove] 
+
+#get rid of the remaining observations that have missing data
+
+housing_no_missing <- na.omit(housing.refined) #this will remove all observations with NAs
+
+#wow, we omitted almost 2/3 of our observations. I don't really like it, but
+
+#I'll live with it for now.
+
+#double check there are no remaining NAs
+
+# sum(is.na(housing_no_missing))
+
+#triple check all variables make sense
+
+# str(housing_no_missing)
+```
+
+Remove the column "Utilities" since all the values in the column are similar and check if there are any other columns like that. 
+```{r}
+### check if we have any variables with 1 unique value
+
+# count unique values for each variable
+unique_count <- sapply(housing_no_missing, function(x) length(unique(x)))
+
+# make a list of the variables with 1 unique value
+uniq = c()
+i_range <- c(1:length(housing_no_missing))
+
+for (i in i_range){
+  if (unique_count[i] == 1){
+    uniq <- append(uniq, i)
+  }
+}
+
+# remove variables with 1 unique value since it doesn't contribute to the model
+# there is only 1 variable to remove
+housing_no_missing[,uniq[1]] <- NULL
+
+```
+
+Checking for outliers, there are 17 housing price that are considered outliers but we decided to include them in our model since removing them didn't give us a big difference in our results. 
+```{r}
+
+#checking for outliers
+IQR = (summary(housing_no_missing$SalePrice) [5] - summary(housing_no_missing$SalePrice) [2])*1.5
+lower_lim <- summary(housing_no_missing$SalePrice) [2] - IQR
+upper_lim <- summary(housing_no_missing$SalePrice) [5] + IQR
+
+# we have no values lower than our lower limit
+
+sum(housing_no_missing$SalePrice > upper_lim)
+```
+
+**Question 1**: What features are most relevant to determining the sell price of a house in Ames, Iowa?
+
+We want to find the variables that have the most significant effect on sell price. -> the coefficients with the smallest p-values.
+
+For model1, we are taking all vairables and only choosing those with the smallest p-values for our next model.
+```{r}
+# coeficient with the smallest p value
+
+model1 <- lm(SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + 
+               LandContour + LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 +  
+               BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + 
+               RoofStyle +  RoofMatl + Exterior1st + Exterior2nd + MasVnrType + MasVnrArea + 
+               ExterQual+ ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + 
+               BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + Heating + 
+               HeatingQC + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + 
+               GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + 
+               KitchenAbvGr + KitchenQual + TotRmsAbvGrd + Functional + Fireplaces + FireplaceQu +
+               GarageType + GarageYrBlt + GarageFinish + GarageCars + GarageArea + GarageQual + 
+               GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + 
+               ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition
+             , data = housing_no_missing)
+
+#summary(model1)
+
+p_values <- summary(model1)$coefficients[,4]  
+
+head(sort(p_values), 25)
+```
+From the sorted p-values, we picked the 13 smallest p-values, using them for model2.
+
+model2: A linear regression model with the 13 smallest p-values.
+
+Before plotting our model2 we need to check how accurate our predictions are. This is shown in the "spread of our residuals". The cluster around 200,000 is because most of our data is surrounded there. We can then plot a histogram to take a closer look at the cluster at about 200,000.
+
+Our plot model2 shows our predicted price vs actual price
+
+```{r}
+model2 <- lm(SalePrice ~ RoofMatl + BsmtFinSF1 + X2ndFlrSF + X1stFlrSF + OverallQual + KitchenQual + OverallCond  + Neighborhood + LotArea + LotConfig + BsmtExposure + LotFrontage + MasVnrArea, data = housing_no_missing)
+
+#summary(model2)
+
+#rss for our overall model2
+sqrt(sum(residuals(model2)*residuals(model2))/length(housing_no_missing$SalePrice))
+```
+
+Here we can see how spread our residuals are under model2:
+```{r}
+
+#checking how spread out our residuals are
+options(scipen=9)
+ggplot(model2) + 
+  geom_point(aes(x = fitted(model2) , y = residuals(model2)), color = "blue", alpha = .5) +
+  ggtitle("Spread Of Residuals") + xlab("Predicted Price using model2") + ylab("Residuals") + theme_minimal()
+
+```
+From the above graph, we can also see that most of our predicted price cluster around 200,000. If we look at the spread of our sales price in Ames, we can see that same cluster repeated.
+```{r}
+ggplot(housing_no_missing) +
+  geom_histogram(aes(SalePrice), color = "blue", fill = "skyblue") + 
+  ggtitle("Sales Price in Ames") + xlab("Sales Price") + theme_minimal()
+
+```
+What we want from this model is to get predictions as close to the actual sale price as possible.
+```{r}
+#fitted model2
+ggplot(model2) + 
+  geom_point(aes(x = fitted(model2) , y = housing_no_missing$SalePrice), color = "blue", alpha = .5) +
+  ggtitle("Predicted Price vs Actual Price") + xlab("Predicted Price") + ylab("Actual Price") + theme_minimal()
+```
+
+Since the cluster of values is clustered close to the x=y line, we can say our model is performing how we want it to perform. 
+
+**Question 2**: What is the maximum price Morty could sell his house for as is?
+
+The maximum price we calculated for Morty using our model is $148877.50. 
+
+```{r}
+morty <- read.csv("Morty.txt", header = TRUE)
+
+predict(model2, morty)
+```
+
+**Question 3**: What three enhancements can Morty make to most increase the sell price of his home?
+
+Morty should change the *RoofMat1, OverallQual*, and *OverallCon*. We came to these conclusion by looking at what features Morty's house had and changing those to ones that can give him the highest price value change. For example, Morty has the best possible *KitchenQual* in terms of price so we didn't include that as a possible way to increase prices even though it wasn't the best possible *KitchenQual*. We also removed unrealistic or costly changes that Morty could make from our recommendation. 
+
+*RoofMatl*: If Morty changes the roof material to Wood Shingle, the price of the house increases by $87622.46.
+
+*OverallQual*: Morty is currently on 5 out of 10 and for every additional point he can get, he can increase his house's sale price by $14149.24. 
+
+*OverallCon*: Morty is currently on 5 out of 10 and for every additional point he can get, he can increase his house's sale price by $7535.75.
+
+```{r}
+# summary(model2)
+
+#what we can change:
+# RoofMat1, OverallQual, KitchenQual, OverallCon
+
+#what we cant change:
+# BsmtExposure, LotCongig, LotFrontage, BsmtFinSF1, X2ndFlrSF, X1stFlrSF, Neighborhood, MasVnrArea
+
+#morty$RoofMatl : RoofMatlWdShngl, 683403.7299 - 595781.2716 
+#morty$OverallQual : currently on 5, increase 14149.2468 by every point
+#morty$KitchenQual : TA best in terms of price 
+#morty$OverallCon : currently on 5, increase 7535.7537 by every point
+
+```
+
+
+## Part 2: Predictive Modeling
+
+```{r}
+#create a list of random number ranging from 1 to number of rows from the data
+
+set.seed(3) # 3
+samp = sort(sample(nrow(housing_no_missing), nrow(housing_no_missing)*.7))
+
+#creating training and test data
+train_data <- housing_no_missing[samp,]
+test_data <- housing_no_missing[-samp,]
+
+```
+
+**Question**: Develop the "best" regression model for predicting the sale price of a house for new homes on the market.
+
+We first tried the simplest model, Model3 which uses only 7 variables. To verify that our models are performing as it should, we predicted on the test data and used the RSS to compare models. 
+
+```{r} 
+# #Condition2 has new levels PosN
+# test_data$Condition2 == "PosN"
+# 
+# test_data <- test_data[-c(71),]
+# test_data <- test_data[-c(106),]
+
+#removing Neighborhood + LotArea + LotConfig + BsmtExposure + LotFrontage + MasVnrArea
+
+model3 <- lm(SalePrice ~ RoofMatl + BsmtFinSF1 + X2ndFlrSF + X1stFlrSF + OverallQual + KitchenQual + OverallCond, data = train_data)
+
+#RSS
+val  <- predict(model3, test_data) - test_data$SalePrice
+sqrt(sum((val*val)/length(test_data$SalePrice))) #RSS = 58372.25
+```
+
+After adding *Neighborhood, LotArea, LotConfig, BsmtExposure, LotFrontage* and  *MasVnrArea* to the above model we saw that having these improves our model. 
+
+Model4 also gave us the lowest RSS. We did not include *ExterQual* and *Condition2* in our final model because we received level errors when included.
+```{r}
+
+# linear regression model 4
+model4 <- lm(SalePrice ~ RoofMatl + BsmtFinSF1 + X2ndFlrSF + X1stFlrSF + OverallQual + KitchenQual + OverallCond  + Neighborhood + LotArea + LotConfig + BsmtExposure + LotFrontage + MasVnrArea, data = train_data)
+
+#on training data
+ggplot(model4) + 
+  geom_point(aes(x = fitted(model4) , y = train_data$SalePrice), color = "darkgreen", alpha = .5) +
+  ggtitle("Training Data: Predicted Value vs SalePrice") + xlab("Predicted Price") + ylab("Actual Price") + theme_minimal()
+
+
+#on test data
+ggplot() + 
+  geom_point(aes(x = predict(model4, test_data) , y = test_data$SalePrice), color = "darkgreen", alpha = .5) +
+  ggtitle("Test Data: Predicted Value vs SalePrice") + xlab("Predicted Price") + ylab("Actual Price") + theme_minimal()
+
+# RSS
+val  <- predict(model4, test_data) - test_data$SalePrice
+sqrt(sum((val*val)/length(test_data$SalePrice))) #RSS = 50190.97
+
+```
+
